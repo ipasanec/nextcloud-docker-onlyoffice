@@ -1,0 +1,93 @@
+version: "2"
+
+services:
+  nextcloud-db:
+    image: mariadb
+    container_name: nextcloud-db
+    command: --transaction-isolation=READ-COMMITTED – log-bin=ROW
+    command: --innodb_read_only_compressed=OFF
+    restart: unless-stopped
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      - ./database:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=nextcloud #SQL root Passwort eingeben
+      - MYSQL_INITDB_SKIP_TZINFO=1 
+    env_file:
+      - db.env
+
+  nextcloud-redis:
+    image: redis:alpine
+    container_name: nextcloud-redis
+    hostname: nextcloud-redis
+    restart: unless-stopped
+    command: redis-server --requirepass nextcloud # Redis Passwort eingeben
+
+  nextcloud-app:
+    build: ./nextcloud-app
+    container_name: nextcloud-app
+    restart: unless-stopped
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+    environment:
+        MYSQL_HOST: nextcloud-db
+        REDIS_HOST: nextcloud-redis
+        REDIS_HOST_PASSWORD: nextcloud # Redis Passwort von oben wieder eingeben
+    volumes:
+      - ./app:/var/www/html
+#      - ./data:/var/www/html/data
+      - ./imagemagick/policy.xml:/etc/ImageMagick-6/policy.xml
+    env_file:
+      - db.env
+
+
+  web:
+    build: ./web
+    restart: always
+    ports:
+      # - 127.0.0.1:8080:80
+      - 8080:80
+    volumes:
+      - ./app:/var/www/html:ro
+    depends_on:
+      - nextcloud-app
+
+  cron:
+    image: nextcloud:fpm-alpine
+    restart: always
+    volumes:
+      - ./app:/var/www/html:ro
+    entrypoint: /cron.sh
+    depends_on:
+      - nextcloud-db
+      - nextcloud-redis
+
+  elasticsearch:
+    build: ./elasticsearch
+    container_name: elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - ./elasticsearch/data:/usr/share/elasticsearch/data
+        # ports:
+        #     - '9200:9200'
+        #     - '9300:9300'
+
+  collabora:
+    image: collabora/code
+    container_name: collabora
+    restart: always 
+    ports:
+      - 127.0.0.1:9980:9980
+    environment:
+      domain: localhost
+      username: admin
+      password: nextcloud
+      extra_params: "--o:ssl.enable=false"
